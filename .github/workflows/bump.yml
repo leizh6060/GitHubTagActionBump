@@ -1,40 +1,81 @@
-name: Create  tag  such as1.0.0
+name: Auto Release on Merge
 
 on:
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Tag name (e.g. v1.2.3)'
-        required: true
-      message:
-        description: 'Tag message'
-        required: false
-        default: 'Release'
+  push:
+    branches:
+      - main
 
 jobs:
-  create-tag:
+  release:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Configure git
+      - name: Get latest tag
+        id: pre_tag
         run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch --tags
+          LATEST_TAG=$(git describe --tags --abbrev=0 --tags "v*.*.*" 2>/dev/null || echo "v0.0.0")
+          echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+          VERSION=${LATEST_TAG#v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-      - name: Create and push annotated tag
+      - name: Determine bump type from commits
+        id: bump_logic
         run: |
-          git tag -a "${{ github.event.inputs.tag }}" \
-            -m "${{ github.event.inputs.message }}"
-          git push origin "${{ github.event.inputs.tag }}"
+          LATEST_TAG="${{ steps.pre_tag.outputs.latest_tag }}"
+          
+          # Get all commit messages since the last tag
+          if [ "$LATEST_TAG" = "v0.0.0" ]; then
+            COMMITS=$(git log --format=%B)
+          else
+            COMMITS=$(git log "$LATEST_TAG"..HEAD --format=%B)
+          fi
+          
+          # Default bump is patch
+          BUMP="patch"
+          
+          # Look for conventional commit patterns
+          if echo "$COMMITS" | grep -qE "BREAKING CHANGE|BREAKING:"; then
+            BUMP="major"
+          elif echo "$COMMITS" | grep -qE "^feat(\(.*\))?:"; then
+            BUMP="minor"
+          fi
+          
+          echo "bump_type=$BUMP" >> $GITHUB_OUTPUT
+          echo "Determined bump type: $BUMP"
 
-      - name: Summary
+      - name: Calculate next tag
+        id: next_tag
         run: |
-          echo "### Tag created" >> $GITHUB_STEP_SUMMARY
-          echo "Tag: \`${{ github.event.inputs.tag }}\`" >> $GITHUB_STEP_SUMMARY
+          VERSION="${{ steps.pre_tag.outputs.version }}"
+          BUMP_TYPE="${{ steps.bump_logic.outputs.bump_type }}"
+          
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+          
+          if [ "$BUMP_TYPE" = "major" ]; then
+            MAJOR=$((MAJOR + 1))
+            MINOR=0
+            PATCH=0
+          elif [ "$BUMP_TYPE" = "minor" ]; then
+            MINOR=$((MINOR + 1))
+            PATCH=0
+          else
+            PATCH=$((PATCH + 1))
+          fi
+          
+          NEW_TAG="v$MAJOR.$MINOR.$PATCH"
+          echo "NEW_TAG=$NEW_TAG" >> $GITHUB_ENV
+          echo "Generated tag: $NEW_TAG"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.NEW_TAG }}
+          name: Release ${{ env.NEW_TAG }}
+          generate_release_notes: true
