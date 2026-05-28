@@ -1,23 +1,40 @@
-name: Bump version
+name: Create  tag  such as1.0.0
+
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag name (e.g. v1.2.3)'
+        required: true
+      message:
+        description: 'Tag message'
+        required: false
+        default: 'Release'
+
 jobs:
-  build:
+  create-tag:
     runs-on: ubuntu-latest
     permissions:
-       contents: write # IMPORTANT: Added this to prevent "Resource not accessible" error
+      contents: write
+
     steps:
-      - uses: actions/checkout@v4
-      - name: Bump version and push tag
-        id: tag_version
-        uses: mathieudutour/github-tag-action@v6.2
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Create a GitHub release
-        uses: ncipollo/release-action@v1
-        with:
-          tag: ${{ steps.tag_version.outputs.new_tag }}
-          name: Release ${{ steps.tag_version.outputs.new_tag }}
-          body: ${{ steps.tag_version.outputs.changelog }}
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Create and push annotated tag
+        run: |
+          git tag -a "${{ github.event.inputs.tag }}" \
+            -m "${{ github.event.inputs.message }}"
+          git push origin "${{ github.event.inputs.tag }}"
+
+      - name: Summary
+        run: |
+          echo "### Tag created" >> $GITHUB_STEP_SUMMARY
+          echo "Tag: \`${{ github.event.inputs.tag }}\`" >> $GITHUB_STEP_SUMMARY
