@@ -6,6 +6,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+       contents: write # IMPORTANT: Added this to prevent "Resource not accessible" error
     steps:
       - uses: actions/checkout@v4
       - name: Bump version and push tag
